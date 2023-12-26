@@ -14,16 +14,11 @@ const conf = {
 };
 
 // Start server
-app.use(express.static('public'));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-
 const PORT = process.env.PORT || 3001;
 
 app.listen(PORT, () => {
     console.log('Server is running properly on port: ' + PORT);
 });
-
 
 //Posting products Via postman console to the database.
 app.post('/products', async (req, resp) => {
@@ -34,15 +29,14 @@ app.post('/products', async (req, resp) => {
         const { product_name, price, category } = req.body;
 
         // Perform the INSERT operation
-        const [rows] = await con.execute('INSERT INTO product (product_name, price, category) VALUES (?, ?, ?)', [product_name, price, category]);
+        const [result] = await con.execute('INSERT INTO product (product_name, price, category) VALUES (?, ?, ?)', [product_name, price, category]);
 
-        resp.status(201).json({ message: 'Product created successfully' });
+        resp.status(201).json({ message: 'Product created successfully', insertedId: result.insertId }); // This shows the product ID that has been added
     } catch (error) {
         console.log(error);
-        resp.status(500).send(error.message);
+        resp.status(500).json({ error: 'Internal Server Error', details: error.message });
     }
 });
-
 
 // GET endpoint for /products
 app.get('/products', async (req, resp) => {
@@ -57,7 +51,7 @@ app.get('/products', async (req, resp) => {
         resp.status(200).json(rows);
     } catch (error) {
         console.log(error);
-        resp.status(500).send(error.message);
+        resp.status(500).json({ error: 'Internal Server Error', details: error.message });
     }
 });
 
@@ -66,7 +60,6 @@ app.get('/categories', async (req, resp) => {
     try {
         const con = await mysql.createConnection(conf);
 
-        // Handle the case where id might be undefined ---> Just simply selects all products.
         const id = req.query.id || null;
         const sql = id === null ? 'SELECT * FROM product_category' : 'SELECT * FROM product_category WHERE id = ?';
 
@@ -74,46 +67,51 @@ app.get('/categories', async (req, resp) => {
         resp.status(200).json(rows);
     } catch (error) {
         console.log(error);
-        resp.status(500).send(error.message);
+        resp.status(500).json({ error: 'Internal Server Error', details: error.message });
     }
 });
 
 
 
+// Get Current customerlist
 
-// User Registration
+app.get('/customers', async (req, resp) => {
+    try {
+        console.log('Handling /customers request');
+        const con = await mysql.createConnection(conf);
+        const id = req.query.id || null;
+        const sql = id === null ? 'SELECT * FROM customer' : 'SELECT * FROM customer WHERE id = ?';
+        const [rows] = await con.execute(sql, [id]);
+        resp.status(200).json(rows);
+    } catch (error) {
+        console.log(error);
+        resp.status(500).json({ error: 'Internal Server Error', details: error.message });
+    }
+});
 
-// Registering user to Customer database
 
-// POST
+// Registering user to Customer database (Tried different approachment compared to verkkokauppa.js via pool)
+
+// POST New Customer via postman
+
 const pool = mysql.createPool(conf);
 
 app.post('/register', async (req, resp) => {
     try {
-        console.log('Received POST request to /register');
-
         const { fname, lname, uname, pw } = req.body;
+        console.log('Password:', pw);
         console.log('Received Request Body:', req.body);
 
         // Hash the password
         const saltRounds = 10;
         const hashedPassword = await bcrypt.hash(pw, saltRounds);
 
-        if (!hashedPassword) {
-            console.error('Error hashing the password');
-            resp.status(500).json({ error: 'Internal Server Error' });
-            return;
-        } else {
-            console.log('Password hashed successfully:', hashedPassword);
-        }
+        console.log('Hashed Password:', hashedPassword);
+
 
         // Insert user into the database using a connection from the pool
         const sql = 'INSERT INTO customer (first_name, last_name, username, pw) VALUES (?, ?, ?, ?)';
-        const values = [fname, lname, uname, hashedPassword || null];
-
-        console.log('Executing SQL query:', sql);
-        console.log('SQL query parameters:', values);
-
+        const values = [fname, lname, uname, hashedPassword];
         const [result] = await pool.execute(sql, values);
 
         console.log('User inserted into the database:', result);
@@ -128,6 +126,6 @@ app.post('/register', async (req, resp) => {
 // GET
 app.get('/register', (req, res) => {
     console.log('Received GET request to /register');
-    res.status(404).send(":DD");
 });
+
 
