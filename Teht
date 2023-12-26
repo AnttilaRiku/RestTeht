@@ -1,10 +1,15 @@
 const mysql = require('mysql2/promise');
 const express = require('express');
+const app = express();
+const multer = require('multer');
+const upload = multer({ dest: 'upload/' });
+const jwt = require('jsonwebtoken');
 const bcrypt = require('bcrypt');
 require('dotenv').config();
 
-const app = express();
+app.use(express.static('public'));
 app.use(express.json()); // Parse JSON requests
+app.use(express.urlencoded({ extended: true }));
 
 const conf = {
     host: process.env.DB_HOST,
@@ -19,6 +24,107 @@ const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
     console.log('Server is running properly on port: ' + PORT);
 });
+
+
+// Get Current customerlist
+
+app.get('/customers', async (req, resp) => {
+    try {
+        console.log('Handling /customers request');
+        const con = await mysql.createConnection(conf);
+        const id = req.query.id || null;
+        const sql = id === null ? 'SELECT * FROM customer' : 'SELECT * FROM customer WHERE id = ?';
+        const [rows] = await con.execute(sql, [id]);
+        resp.status(200).json(rows);
+    } catch (error) {
+        console.log(error);
+        resp.status(500).json({ error: 'Internal Server Error', details: error.message });
+    }
+});
+
+
+// Registering user to Customer database (Tried different approachment compared to verkkokauppa.js via pool)
+
+// POST New Customer via postman
+
+const pool = mysql.createPool(conf);
+
+app.post('/register', async (req, resp) => {
+    try {
+        console.log('Received Request Body:', req.body);
+
+        const fname = req.body[0].fname;
+        const lname = req.body[0].lname;
+        const uname = req.body[0].uname;
+        const pw = req.body[0].pw;
+
+        // Log the original password
+        console.log('Original Password:', pw);
+
+        // Generate a salt value
+        const saltRounds = 10;
+        const salt = await bcrypt.genSalt(saltRounds);
+        console.log('Generated Salt:', salt);
+
+        // Hash the password using the generated salt
+        const hashedPassword = await bcrypt.hash(pw, salt);
+        console.log('Hashed Password:', hashedPassword);
+
+        // Insert user into the database using a connection from the pool
+        const sql = 'INSERT INTO customer (first_name, last_name, username, pw) VALUES (?, ?, ?, ?)';
+        const values = [fname, lname, uname, hashedPassword];
+        const [result] = await pool.execute(sql, values);
+
+        console.log('User inserted into the database:', result);
+
+        resp.status(201).json({ message: 'User created successfully', insertedId: result.insertId });
+    } catch (error) {
+        console.error('Error during user registration:', error);
+        resp.status(500).json({ error: 'Internal Server Error', details: error.message });
+    }
+});
+
+// GET
+app.get('/register', (req, res) => {
+    console.log('Received GET request to /register');
+});
+
+//Login
+
+app.post('/login', upload.none(), async (req, res) => {
+    const uname = req.body.username;
+    const pw = req.body.pw;
+
+    try {
+        const connection = await mysql.createConnection(conf);
+
+        const [rows] = await connection.execute('SELECT pw FROM customer WHERE username=?', [uname]);
+
+        if (rows.length > 0) {
+            const hashedPassword = rows[0].pw;
+
+            // Compare the provided password with the hashed password
+            const isAuth = await bcrypt.compare(pw, hashedPassword);
+
+            if (isAuth) {
+                const token = jwt.sign({ username: uname }, process.env.JWT_KEY, /* 10 seconds per token for security */ { expiresIn: 10 });
+                console.log('JWT Token:', token);
+                res.status(200).json({ jwtToken: token });
+
+            } else {
+                res.status(401).end('User not authorized');
+            }
+        } else {
+            res.status(404).send('User not found');
+        }
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+
+
+// Additional basic product fetching and posting
 
 //Posting products Via postman console to the database.
 app.post('/products', async (req, resp) => {
@@ -69,63 +175,6 @@ app.get('/categories', async (req, resp) => {
         console.log(error);
         resp.status(500).json({ error: 'Internal Server Error', details: error.message });
     }
-});
-
-
-
-// Get Current customerlist
-
-app.get('/customers', async (req, resp) => {
-    try {
-        console.log('Handling /customers request');
-        const con = await mysql.createConnection(conf);
-        const id = req.query.id || null;
-        const sql = id === null ? 'SELECT * FROM customer' : 'SELECT * FROM customer WHERE id = ?';
-        const [rows] = await con.execute(sql, [id]);
-        resp.status(200).json(rows);
-    } catch (error) {
-        console.log(error);
-        resp.status(500).json({ error: 'Internal Server Error', details: error.message });
-    }
-});
-
-
-// Registering user to Customer database (Tried different approachment compared to verkkokauppa.js via pool)
-
-// POST New Customer via postman
-
-const pool = mysql.createPool(conf);
-
-app.post('/register', async (req, resp) => {
-    try {
-        const { fname, lname, uname, pw } = req.body;
-        console.log('Password:', pw);
-        console.log('Received Request Body:', req.body);
-
-        // Hash the password
-        const saltRounds = 10;
-        const hashedPassword = await bcrypt.hash(pw, saltRounds);
-
-        console.log('Hashed Password:', hashedPassword);
-
-
-        // Insert user into the database using a connection from the pool
-        const sql = 'INSERT INTO customer (first_name, last_name, username, pw) VALUES (?, ?, ?, ?)';
-        const values = [fname, lname, uname, hashedPassword];
-        const [result] = await pool.execute(sql, values);
-
-        console.log('User inserted into the database:', result);
-
-        resp.status(201).json({ message: 'User created successfully', insertedId: result.insertId });
-    } catch (error) {
-        console.error('Error during user registration:', error);
-        resp.status(500).json({ error: 'Internal Server Error', details: error.message });
-    }
-});
-
-// GET
-app.get('/register', (req, res) => {
-    console.log('Received GET request to /register');
 });
 
 
